@@ -1,0 +1,5 @@
+# ARM64 runtime dependencies. Keep this separate from local training/CUDA packages.
+llama-cpp-python==0.3.34
+opencv-python-headless
+ultralytics==8.4.96
+pymavlink

@@ -4,6 +4,11 @@ import asyncio
 import urllib.request
 from llama_cpp import Llama
 
+try:
+    from core.validation import CommandValidationError, validate_commander_output
+except ImportError:
+    from src.core.validation import CommandValidationError, validate_commander_output
+
 class CommanderNode:
     def __init__(self, model_repo="microsoft/Phi-3-mini-4k-instruct-gguf", model_file="Phi-3-mini-4k-instruct-q4.gguf"):
         self.model_path = os.path.join(os.getcwd(), model_file)
@@ -34,7 +39,7 @@ class CommanderNode:
             urllib.request.urlretrieve(url, self.model_path, reporthook=report)
             print("\n[Commander] Download complete.")
 
-    async def generate_mavlink_command(self, context_prompt: str):
+    async def generate_mavlink_command(self, context_prompt: str, telemetry=None):
         print("\n[Commander] Triggered! Generating MAVLink routing command...")
         
         # We enforce a strict JSON output representing a MAVLink SET_POSITION_TARGET_LOCAL_NED command
@@ -65,23 +70,20 @@ class CommanderNode:
             return self.llm(
                 prompt,
                 max_tokens=256,
-                stop=["<|end|>", "}"], # Stop at closing brace to truncate garbage
+                stop=["<|end|>"],
                 temperature=0.1
             )
             
         response = await loop.run_in_executor(None, run_inference)
         
         output_text = response['choices'][0]['text'].strip()
-        # Re-append closing brace if it was used as stop token
-        if not output_text.endswith("}"):
-            output_text += "\n}"
-            
         print("[Commander] Generated Command:")
         print(output_text)
         
         try:
             command_json = json.loads(output_text)
-            return command_json
-        except json.JSONDecodeError:
-            print("[Commander] ERROR: Failed to parse LLM output as JSON.")
+            validated_command = validate_commander_output(command_json, telemetry)
+            return validated_command.as_dict()
+        except (json.JSONDecodeError, CommandValidationError) as error:
+            print(f"[Commander] ERROR: Invalid command output: {error}")
             return None

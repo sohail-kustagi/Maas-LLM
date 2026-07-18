@@ -1,3 +1,6 @@
+from core.types import TelemetrySnapshot, VisionEvent
+
+
 class AnalystNode:
     def __init__(self):
         print("[Analyst] Initialized. Awaiting triggers from Watchdog.")
@@ -28,3 +31,18 @@ class AnalystNode:
         )
         
         return context_prompt
+
+    def generate_event_context(
+        self,
+        event: VisionEvent,
+        telemetry: TelemetrySnapshot,
+    ) -> str:
+        return self.generate_context(
+            event.anomaly_type,
+            {
+                "alt": telemetry.altitude_m,
+                "lat": telemetry.latitude,
+                "lon": telemetry.longitude,
+                "heading": telemetry.heading_deg,
+            },
+        )

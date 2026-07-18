@@ -5,3 +5,6 @@ __pycache__/
 *.gguf
 *.log
 .env
+data/*.jsonl
+benchmarks/results/
+models/

@@ -1,0 +1,7 @@
+# Optional local adaptation environment. Do not install this on the edge device.
+transformers
+peft
+trl
+datasets
+accelerate
+sentencepiece

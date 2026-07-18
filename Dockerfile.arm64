@@ -1,0 +1,31 @@
+FROM --platform=linux/arm64 ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    python3-venv \
+    build-essential \
+    cmake \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/maas-llm
+COPY requirements-runtime.txt ./
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install -r requirements-runtime.txt
+
+COPY src ./src
+COPY benchmarks ./benchmarks
+COPY scripts ./scripts
+COPY config ./config
+
+ENV PATH="/opt/venv/bin:${PATH}" \
+    PYTHONPATH="/opt/maas-llm"
+
+CMD ["python3", "-m", "src.main"]

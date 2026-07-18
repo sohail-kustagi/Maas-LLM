@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command", "target_system", "target_component", "x", "y", "z", "reasoning"],
+  "properties": {
+    "command": { "const": "SET_POSITION_TARGET_LOCAL_NED" },
+    "target_system": { "type": "integer", "minimum": 1, "maximum": 255 },
+    "target_component": { "type": "integer", "minimum": 1, "maximum": 255 },
+    "x": { "type": "number", "minimum": -100, "maximum": 100 },
+    "y": { "type": "number", "minimum": -100, "maximum": 100 },
+    "z": { "type": "number", "minimum": -50, "maximum": 20 },
+    "reasoning": { "type": "string", "minLength": 1 }
+  }
+}

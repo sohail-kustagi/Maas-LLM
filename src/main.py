@@ -31,7 +31,9 @@ from src.core.weather_policy import validate_weather_for_flight, WeatherPolicyEr
 from src.core.flight_planner import evaluate_feasibility
 from src.core.route_types import DroneCapabilities, FlightPlan, Waypoint
 from src.core.mission_profiles import PROFILES, MissionProfile
+from src.core.mission_profiles import PROFILES, MissionProfile
 from src.nodes.analyst import AnalystNode
+from src.core.evaluator import HackathonEvaluator
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -375,10 +377,16 @@ async def run_sitl_pipeline(args: argparse.Namespace) -> None:
         mission_profile_name=profile_name,
     )
     
+    evaluator = None
+    if getattr(args, "eval_video", None):
+        evaluator = HackathonEvaluator(args.eval_video, profile_name)
+        watchdog.set_evaluator(evaluator)
+        commander.set_evaluator(evaluator)
+        
     vision_task = None
-    if show_ui:
-        camera_index = int(os.getenv("CAMERA_INDEX", "0"))
-        if watchdog.start_camera(camera_index):
+    if show_ui or getattr(args, "eval_video", None):
+        video_src = getattr(args, "eval_video", None) or int(os.getenv("CAMERA_INDEX", "0"))
+        if watchdog.start_camera(video_src):
             vision_task = asyncio.create_task(watchdog.run_vision_loop())
         else:
             logger.error("[SITL] Failed to start webcam index %d for UI. Continuing without it.", camera_index)
@@ -406,6 +414,8 @@ async def run_sitl_pipeline(args: argparse.Namespace) -> None:
         if vision_task:
             vision_task.cancel()
             watchdog.stop()
+        if evaluator:
+            evaluator.generate_report()
         transport.close()
         logger.info("[SITL] Pipeline shut down cleanly.")
 
@@ -545,6 +555,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--lon", type=float, help="Target longitude for free mode")
     parser.add_argument("--alt", type=float, help="Target altitude for free mode")
     parser.add_argument("--show-ui", action="store_true", help="Enable Live YOLO UI window")
+    parser.add_argument("--eval-video", type=str, help="Path to pre-recorded video for Hackathon Evaluator mode")
     return parser.parse_args()
 
 

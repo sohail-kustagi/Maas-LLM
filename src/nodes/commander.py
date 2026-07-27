@@ -15,6 +15,10 @@ except ImportError:
 class CommanderNode:
     def __init__(self, model_repo="microsoft/Phi-3-mini-4k-instruct-gguf", model_file="Phi-3-mini-4k-instruct-q4.gguf"):
         self.model_path = os.path.join(os.getcwd(), model_file)
+        self.evaluator = None
+
+    def set_evaluator(self, evaluator):
+        self.evaluator = evaluator
         self.download_model(model_repo, model_file)
         
         print(f"[Commander] Loading LLM from {self.model_path}...")
@@ -87,11 +91,21 @@ class CommanderNode:
             
         start_time = time.time()
         response = await loop.run_in_executor(None, run_inference)
+        elapsed_time = time.time() - start_time
         
         raw = response['choices'][0]['text'].strip()
         # Re-attach the pre-seeded opening brace we used to prime the model
         output_text = "{" + raw
         
+        # Calculate benchmarking metrics for the hackathon
+        tokens_generated = 0
+        try:
+            tokens_generated = response['usage']['completion_tokens']
+            tokens_per_sec = tokens_generated / elapsed_time if elapsed_time > 0 else 0
+            print(f"[Commander] Benchmarks: {tokens_generated} tokens in {elapsed_time:.2f}s ({tokens_per_sec:.2f} Tokens/sec)")
+        except KeyError:
+            print(f"[Commander] Benchmarks: {elapsed_time:.2f}s latency")
+
         print("[Commander] Raw Output:")
         print(output_text)
 
@@ -144,7 +158,11 @@ class CommanderNode:
         try:
             command_json = json.loads(repaired)
             validated_command = validate_commander_output(command_json, telemetry, now=start_time)
+            if self.evaluator:
+                self.evaluator.log_llm_generation(tokens_generated, elapsed_time, True)
             return validated_command.as_dict()
         except (json.JSONDecodeError, CommandValidationError) as error:
             print(f"[Commander] ERROR: Invalid command output: {error}")
+            if self.evaluator:
+                self.evaluator.log_llm_generation(tokens_generated, elapsed_time, False)
             return None

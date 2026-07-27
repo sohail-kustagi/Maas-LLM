@@ -47,10 +47,14 @@ class WatchdogNode:
         self.mission_profile_name = mission_profile_name
         self.ui_renderer = YoloOverlayRenderer() if show_ui else None
         self.last_event_at: float = 0.0
+        self.evaluator = None
 
-    def start_camera(self, camera_index: int = 0) -> bool:
-        print(f"[Watchdog] Initializing camera stream on index {camera_index}...")
-        self.cap = cv2.VideoCapture(camera_index)
+    def set_evaluator(self, evaluator):
+        self.evaluator = evaluator
+
+    def start_camera(self, video_source=0) -> bool:
+        print(f"[Watchdog] Initializing vision stream on {video_source}...")
+        self.cap = cv2.VideoCapture(video_source)
         if not self.cap.isOpened():
             print("[Watchdog] ERROR: Cannot open camera.")
             return False
@@ -63,6 +67,13 @@ class WatchdogNode:
             ret, frame = self.cap.read()
             if ret:
                 self.latest_frame = frame
+                if self.evaluator:
+                    self.evaluator.log_frame()
+            else:
+                # End of video file
+                await asyncio.sleep(1)
+                if isinstance(self.cap, cv2.VideoCapture) and not self.cap.isOpened():
+                    break
             await asyncio.sleep(0.01)
 
     async def run_vision_loop(self) -> None:
@@ -111,6 +122,8 @@ class WatchdogNode:
                     ):
                         anomaly_type = self.class_map[best_cls]
                         print(f"[Watchdog] TRIGGER: {anomaly_type} detected (conf={best_conf:.2f})")
+                        if self.evaluator:
+                            self.evaluator.log_detection(anomaly_type, best_conf)
                         event = VisionEvent(
                             drone_id=self.drone_id,
                             timestamp=now,

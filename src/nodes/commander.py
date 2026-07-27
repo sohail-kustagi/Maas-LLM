@@ -2,12 +2,15 @@ import os
 import json
 import asyncio
 import urllib.request
+import time
 from llama_cpp import Llama
 
 try:
     from core.validation import CommandValidationError, validate_commander_output
+    from core.mission_profiles import MissionProfile
 except ImportError:
     from src.core.validation import CommandValidationError, validate_commander_output
+    from src.core.mission_profiles import MissionProfile
 
 class CommanderNode:
     def __init__(self, model_repo="microsoft/Phi-3-mini-4k-instruct-gguf", model_file="Phi-3-mini-4k-instruct-q4.gguf"):
@@ -32,57 +35,115 @@ class CommanderNode:
             url = f"https://huggingface.co/{model_repo}/resolve/main/{model_file}"
             
             def report(count, block_size, total_size):
-                percent = int(count * block_size * 100 / total_size)
-                if percent % 10 == 0:
-                    print(f"\rDownloading: {percent}%", end="")
+                if total_size > 0:  # guard against ZeroDivisionError for chunked transfers
+                    percent = int(count * block_size * 100 / total_size)
+                    if percent % 10 == 0:
+                        print(f"\rDownloading: {percent}%", end="")
             
             urllib.request.urlretrieve(url, self.model_path, reporthook=report)
             print("\n[Commander] Download complete.")
 
-    async def generate_mavlink_command(self, context_prompt: str, telemetry=None):
+    async def generate_mavlink_command(self, context_prompt: str, telemetry=None, mission_profile: MissionProfile = None):
         print("\n[Commander] Triggered! Generating MAVLink routing command...")
+        import re
         
-        # We enforce a strict JSON output representing a MAVLink SET_POSITION_TARGET_LOCAL_NED command
+        # Build a minimal, unambiguous system prompt
+        commander_persona = ""
+        if mission_profile:
+            commander_persona = mission_profile.commander_persona + "\n"
+        
         system_prompt = (
-            "You are an autonomous drone fleet commander. You receive context about a disaster anomaly. "
-            "You must output a strictly formatted JSON object representing a MAVLink navigation command to reroute the drone to investigate."
-            "\n\nJSON SCHEMA:\n"
-            "{\n"
-            '  "command": "SET_POSITION_TARGET_LOCAL_NED",\n'
-            '  "target_system": 1,\n'
-            '  "target_component": 1,\n'
-            '  "x": <float, offset in meters North>,\n'
-            '  "y": <float, offset in meters East>,\n'
-            '  "z": <float, offset in meters Down (negative for altitude)>,\n'
-            '  "reasoning": "<short string explaining why you chose this coordinate based on the context>"\n'
-            "}"
+            f"{commander_persona}"
+            "Output ONLY a raw JSON object with NO markdown, NO comments, NO extra text.\n"
+            "Required keys (all with double-quoted strings and float values):\n"
+            '  command: always "SET_POSITION_TARGET_LOCAL_NED"\n'
+            '  target_system: 1\n'
+            '  target_component: 1\n'
+            '  x: float (meters North, max 100)\n'
+            '  y: float (meters East, max 100)\n'
+            '  z: float (negative = up, e.g. -20.0 for 20m altitude)\n'
+            '  reasoning: short string\n'
+            "Start your response with { and end with }. No backticks. No extra lines."
         )
         
-        prompt = f"<|system|>\n{system_prompt}<|end|>\n<|user|>\n{context_prompt}<|end|>\n<|assistant|>\n"
+        # Pre-seeding { forces the model to continue the JSON rather than add preamble
+        prompt = (
+            f"<|system|>\n{system_prompt}<|end|>\n"
+            f"<|user|>\n{context_prompt}<|end|>\n"
+            f"<|assistant|>\n"
+            "{"
+        )
         
-        # In a real production setup, we would compile a LlamaGrammar for strict JSON syntax enforcement.
-        # For simplicity in this sandbox, we prompt heavily for JSON.
-        
-        # Run inference in a thread to not block the asyncio event loop
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         
         def run_inference():
             return self.llm(
                 prompt,
-                max_tokens=256,
-                stop=["<|end|>"],
-                temperature=0.1
+                max_tokens=200,
+                stop=["<|end|>", "```", "\n\n\n"],
+                temperature=0.05,
+                echo=False,
             )
             
+        start_time = time.time()
         response = await loop.run_in_executor(None, run_inference)
         
-        output_text = response['choices'][0]['text'].strip()
-        print("[Commander] Generated Command:")
-        print(output_text)
+        raw = response['choices'][0]['text'].strip()
+        # Re-attach the pre-seeded opening brace we used to prime the model
+        output_text = "{" + raw
         
+        print("[Commander] Raw Output:")
+        print(output_text)
+
+        # ── Robust JSON repair ────────────────────────────────────────────
+        def repair_json(text: str) -> str:
+            # 1. Strip markdown fences
+            m = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+            if m:
+                text = m.group(1).strip()
+
+            # 2. Extract the JSON object
+            brace_start = text.find('{')
+            brace_end   = text.rfind('}')
+            if brace_start != -1 and brace_end != -1:
+                text = text[brace_start:brace_end + 1]
+
+            # 3. Drop diff-marker lines (lines beginning with -/+) and bare
+            #    "ran" / "raning" fragments the tokenizer sometimes emits
+            cleaned = []
+            for line in text.splitlines():
+                s = line.strip()
+                if s.startswith('- ') or s.startswith('+ ') or s.startswith('//'):
+                    continue
+                cleaned.append(line)
+            text = '\n'.join(cleaned)
+
+            # 4. Fix the specific Phi-3 tokenizer bug: the opening quote of
+            #    "reasoning" is dropped and the key name is mangled.
+            #    Pattern catches: raning_reasoning, raning reasoning, ran_reasoning,
+            #    reasoning (no leading quote), etc.
+            text = re.sub(
+                r'(?<!\")(?:ran(?:ing)?[_\s]?)?reasoning(?:[_\s]\w+)?\s*\"?',
+                '"reasoning"',
+                text
+            )
+
+            # 5. Some fields are written without quotes on keys — fix them
+            text = re.sub(r'(?<=[{,\n])\s*([a-zA-Z_]\w*)\s*:', r' "\1":', text)
+
+            # 6. Insert missing commas between a closing value and the next key
+            #    e.g.  "target_component": 1\n  "reasoning"  →  add comma
+            text = re.sub(r'([\d"\]true false null])\s*\n(\s*")', r'\1,\n\2', text)
+
+            return text
+
+        repaired = repair_json(output_text)
+        print("[Commander] Repaired Command:")
+        print(repaired)
+
         try:
-            command_json = json.loads(output_text)
-            validated_command = validate_commander_output(command_json, telemetry)
+            command_json = json.loads(repaired)
+            validated_command = validate_commander_output(command_json, telemetry, now=start_time)
             return validated_command.as_dict()
         except (json.JSONDecodeError, CommandValidationError) as error:
             print(f"[Commander] ERROR: Invalid command output: {error}")

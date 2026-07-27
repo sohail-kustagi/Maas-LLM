@@ -12,6 +12,16 @@ class TelemetrySnapshot:
     altitude_m: float
     heading_deg: float
     battery_percent: Optional[float] = None
+    ground_speed_mps: Optional[float] = None
+    climb_rate_mps: Optional[float] = None
+    gps_fix_type: Optional[int] = None
+    satellites_visible: Optional[int] = None
+    flight_mode: Optional[str] = None
+    is_armed: Optional[bool] = None
+    failsafe_state: Optional[str] = None
+    home_latitude: Optional[float] = None
+    home_longitude: Optional[float] = None
+    home_altitude_m: Optional[float] = None
 
     def age_seconds(self, now: Optional[float] = None) -> float:
         current_time = now if now is not None else datetime.now(timezone.utc).timestamp()

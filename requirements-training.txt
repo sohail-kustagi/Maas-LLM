@@ -5,3 +5,6 @@ trl
 datasets
 accelerate
 sentencepiece
+roboflow
+pyyaml
+yt-dlp

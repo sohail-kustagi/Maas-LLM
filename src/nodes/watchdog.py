@@ -71,10 +71,13 @@ class WatchdogNode:
                     self.evaluator.log_frame()
             else:
                 # End of video file
-                await asyncio.sleep(1)
-                if isinstance(self.cap, cv2.VideoCapture) and not self.cap.isOpened():
-                    break
-            await asyncio.sleep(0.01)
+                print("[Watchdog] End of video stream reached.")
+                self.latest_frame = None
+                if self.cap:
+                    self.cap.release()
+                break
+            # Add a small delay matching 30fps for realistic video playback
+            await asyncio.sleep(0.033)
 
     async def run_vision_loop(self) -> None:
         if not self.cap or not self.cap.isOpened():
@@ -91,6 +94,9 @@ class WatchdogNode:
             while True:
                 frame = self.latest_frame
                 if frame is None:
+                    if self.cap is None or not self.cap.isOpened():
+                        print("[Watchdog] Camera closed. Exiting vision loop.")
+                        break
                     await asyncio.sleep(0.1)
                     continue
 

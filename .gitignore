@@ -1,10 +1,52 @@
+# Virtual Environment & Python Cache
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Model Weights & Binaries
 *.pt
 *.gguf
-*.log
-.env
-data/*.jsonl
-benchmarks/results/
+*.bin
+*.onnx
 models/
+weights/
+
+# Datasets & Archives
+data/
+datasets/
+Wildfire-Smoke*/
+yolo-floods-relief*/
+master_dataset.zip
+*.zip
+*.tar.gz
+*.tgz
+
+# Logs, Runs & Simulation Outputs
+*.log
+logs/
+runs/
+benchmarks/results/
+eeprom.bin
+mav.parm
+*.tlog
+*.tlog.*
+terrain/
+sitl/
+
+# Media & Video Evaluation Files
+*.mp4
+*.avi
+*.mkv
+youtube_raw.*
+
+# Environment & OS Caches
+.env
+.env.*
+.DS_Store

@@ -404,10 +404,17 @@ async def run_sitl_pipeline(args: argparse.Namespace) -> None:
     )
 
     try:
-        logger.info("[SITL] Pipeline running. Waiting for scenario to complete...")
-        await inject_task  # finishes after ~120 s
-        logger.info("[SITL] Scenario complete. Giving pipeline 10 s to flush events.")
-        await asyncio.sleep(10.0)
+        if getattr(args, "eval_video", None):
+            logger.info("[SITL] Video Eval Mode: Waiting for video to finish...")
+            if vision_task:
+                await vision_task
+            logger.info("[SITL] Video finished. Giving pipeline 5s to flush events.")
+            await asyncio.sleep(5.0)
+        else:
+            logger.info("[SITL] Pipeline running. Waiting for scenario to complete...")
+            await inject_task  # finishes after ~120 s
+            logger.info("[SITL] Scenario complete. Giving pipeline 10 s to flush events.")
+            await asyncio.sleep(10.0)
     finally:
         inject_task.cancel()
         event_task.cancel()

@@ -16,10 +16,10 @@ class CommanderNode:
     def __init__(self, model_repo="microsoft/Phi-3-mini-4k-instruct-gguf", model_file="Phi-3-mini-4k-instruct-q4.gguf"):
         self.model_path = os.path.join(os.getcwd(), model_file)
         self.evaluator = None
+        self.download_model(model_repo, model_file)
 
     def set_evaluator(self, evaluator):
         self.evaluator = evaluator
-        self.download_model(model_repo, model_file)
         
         print(f"[Commander] Loading LLM from {self.model_path}...")
         # Since this runs on an IdeaPad with 16GB RAM and Core Ultra, we will use CPU/OpenBLAS natively

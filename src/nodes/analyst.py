@@ -17,7 +17,36 @@ except ImportError:
 
 class AnalystNode:
     def __init__(self):
-        print("[Analyst] Initialized. Awaiting triggers from Watchdog.")
+        self.system_prompt = (
+            "**Role:** You are the Lead Disaster Analyst AI for an autonomous Search and Rescue (SAR) drone system. "
+            "You operate as the critical reasoning layer between the drone's raw computer vision pipeline and the flight Commander node.\n\n"
+            "**Input Data:** You will receive telemetry data and structured JSON payloads from an aerial YOLO-SAHI vision model. "
+            "The vision model detects four specific classes from a top-down perspective:\n"
+            "1. `infrastructure` (submerged or intact buildings/houses/docks)\n"
+            "2. `person` (survivors or rescue personnel)\n"
+            "3. `vehicle` (ground transport like cars/trucks)\n"
+            "4. `watercraft` (boats or rescue vessels)\n\n"
+            "**Objectives:**\n"
+            "1. **Analyze Spatial Context:** Interpret the relationships between detected objects. For example, a `person` bounding box overlapping an `infrastructure` bounding box indicates a stranded survivor on a roof. A `person` next to a `watercraft` indicates an active rescue.\n"
+            "2. **Triage & Prioritize:** Assign a threat severity level (Critical, High, Medium, Low) to the current drone visual frame based on the presence and context of stranded persons.\n"
+            "3. **Report:** Generate a structured, actionable intelligence brief for the Commander node to determine the next flight path or alert protocol.\n\n"
+            "**Constraints:**\n"
+            "- You must rely ONLY on the provided vision payload. Do not hallucinate objects or events that are not explicitly detected.\n"
+            "- You are functioning in a high-speed pipeline. Keep your reasoning concise.\n"
+            "- **CRITICAL:** You must output ONLY valid, parsable JSON. Do not include introductory text, conversational filler, or markdown formatting (do not use ```json).\n\n"
+            "**Expected JSON Output Schema:**\n"
+            "{\n"
+            '  "frame_id": "<ID from input>",\n'
+            '  "zone_assessment": {\n'
+            '    "severity_level": "<Critical|High|Medium|Low>",\n'
+            '    "stranded_persons_detected": <true|false>,\n'
+            '    "active_rescue_in_progress": <true|false>\n'
+            '  },\n'
+            '  "tactical_summary": "<A strict 1-2 sentence description of detected objects on scene>",\n'
+            '  "commander_recommendation": "<Hold_Position|Alert_Rescue_Teams|Continue_Recon_Pattern>"\n'
+            "}"
+        )
+        print("[Analyst] Initialized Lead Disaster Analyst AI with 4-class SAR schema.")
 
     def generate_context(
         self, 
@@ -29,22 +58,21 @@ class AnalystNode:
     ) -> str:
         """
         Takes raw triggers from Node A, telemetry, weather, and feasibility data, 
-        and formulates a rich context prompt for Node C (Commander).
+        and formulates a rich structured context prompt for Node C (Commander).
         """
         print(f"[Analyst] Processing anomaly: {vision_event_type}")
         
-        # Extract telemetry
         alt = current_telemetry.get("alt", "Unknown")
         lat = current_telemetry.get("lat", "Unknown")
         lon = current_telemetry.get("lon", "Unknown")
         heading = current_telemetry.get("heading", "Unknown")
         
-        context_prompt = ""
+        context_prompt = f"{self.system_prompt}\n\n"
         if mission_profile:
             context_prompt += f"MISSION CONTEXT: {mission_profile.analyst_persona}\n\n"
             
         context_prompt += (
-            f"ALERT: The edge node vision system has detected a high-confidence anomaly of type '{vision_event_type}'.\n"
+            f"ALERT: The edge vision system has detected high-confidence anomalies involving '{vision_event_type}'.\n"
             f"Current Drone Telemetry:\n"
             f"- Latitude: {lat}\n"
             f"- Longitude: {lon}\n"
@@ -65,13 +93,11 @@ class AnalystNode:
                 f"\nRoute Feasibility Check:\n"
                 f"- Is Feasible: {feasibility.get('is_feasible')}\n"
                 f"- Risk Level: {feasibility.get('risk_level')}\n"
-                f"- Battery Remaining: OK\n"
             )
 
         context_prompt += (
-            f"\nThe swarm is currently holding position. As the fleet commander, you must calculate an immediate "
-            f"MAVLink local offset (x, y, z) to safely maneuver the drone closer to investigate the {vision_event_type}. "
-            f"Keep altitude changes minimal unless necessary. Account for wind if present. Output ONLY the JSON command."
+            f"\nBased strictly on the telemetry and vision detection of '{vision_event_type}', generate the structured "
+            f"intelligence brief and commander recommendation in ONLY valid JSON matching the exact schema."
         )
         
         return context_prompt

@@ -12,14 +12,22 @@ except ImportError:
     from src.core.yolo_ui import YoloOverlayRenderer
 
 
-# Default COCO class ID → disaster anomaly type mapping.
-# Add custom-trained YOLO class IDs here to extend detection.
+# Unified Master Vision Model classes (custom trained)
+MASTER_CLASS_MAP: dict[int, str] = {
+    0: "infrastructure",
+    1: "person",
+    2: "vehicle",
+    3: "watercraft",
+}
+
+# COCO fallback mapping (when using standard yolov10n.pt before custom training)
 DEFAULT_CLASS_MAP: dict[int, str] = {
-    0: "human_survivor",    # COCO class 0 = person
-    # Example for a custom-trained model:
-    # 80: "fire",
-    # 81: "flood_water",
-    # 82: "vehicle",
+    0: "person",
+    2: "vehicle",
+    3: "vehicle",
+    5: "vehicle",
+    7: "vehicle",
+    8: "watercraft",
 }
 
 

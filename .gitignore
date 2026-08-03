@@ -23,6 +23,9 @@ data/
 datasets/
 Wildfire-Smoke*/
 yolo-floods-relief*/
+Aerial-Person-Detection*/
+Houses_in_Flood*/
+SeaDrone*/
 master_dataset.zip
 *.zip
 *.tar.gz

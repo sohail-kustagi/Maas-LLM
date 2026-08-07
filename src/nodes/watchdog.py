@@ -34,7 +34,7 @@ DEFAULT_CLASS_MAP: dict[int, str] = {
 class WatchdogNode:
     def __init__(
         self,
-        model_path: str = "yolov10n.pt",
+        model_path: str = "weights/best.pt",
         event_queue: Optional[asyncio.Queue] = None,
         sample_interval: float = 0.2,
         confidence_threshold: float = 0.6,
@@ -43,8 +43,21 @@ class WatchdogNode:
         show_ui: bool = False,
         mission_profile_name: str = "sandbox",
     ):
+        import os
+        if not os.path.exists(model_path):
+            print(f"\n[Watchdog] ERROR: Custom weights not found at '{model_path}'!")
+            print("[Watchdog] Please ensure you have placed your fine-tuned 'best.pt' inside the 'weights/' folder.")
+            print("[Watchdog] You can also override the path by setting the YOLO_MODEL_PATH environment variable.")
+            print("[Watchdog] Exiting to prevent model load failure.\n")
+            raise FileNotFoundError(f"Missing weights file: {model_path}")
+
         print(f"[Watchdog] Loading Vision Model: {model_path}")
         self.model = YOLO(model_path)
+        
+        print("=== MODEL CLASS DICTIONARY ===")
+        print(self.model.names)
+        print("==============================")
+        
         self.cap: Optional[cv2.VideoCapture] = None
         self.event_queue = event_queue
         self.sample_interval = sample_interval
@@ -134,7 +147,7 @@ class WatchdogNode:
                         self.event_queue is not None
                         and now - self.last_event_at >= self.sample_interval
                     ):
-                        anomaly_type = self.class_map[best_cls]
+                        anomaly_type = self.model.names[best_cls]
                         print(f"[Watchdog] TRIGGER: {anomaly_type} detected (conf={best_conf:.2f})")
                         if self.evaluator:
                             self.evaluator.log_detection(anomaly_type, best_conf)

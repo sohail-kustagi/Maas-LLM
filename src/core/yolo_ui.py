@@ -16,9 +16,25 @@ class YoloOverlayRenderer:
         if not self._is_active:
             return
 
-        # 1. Plot YOLO results natively
-        # Ultralytics results[0].plot() returns a BGR image with boxes/labels
-        annotated_frame = results[0].plot() if len(results) > 0 else frame.copy()
+        # 1. Plot YOLO results manually to enforce correct class names from model.names
+        annotated_frame = frame.copy()
+        if len(results) > 0:
+            for box in results[0].boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                conf = float(box.conf[0])
+                class_id = int(box.cls[0])
+                
+                # Dynamically pull the class name from the model's internal dictionary
+                class_name = results[0].names[class_id]
+                label = f"{class_name} {conf:.2f}"
+                
+                # Draw bounding box
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                
+                # Draw text label background and text
+                (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                cv2.rectangle(annotated_frame, (x1, y1 - 20), (x1 + w, y1), (0, 255, 0), -1)
+                cv2.putText(annotated_frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
 
         # 2. Add Telemetry HUD Overlay
         if telemetry:

@@ -8,7 +8,7 @@ Environment variables:
   CAMERA_INDEX          int   (default: 0)
   VISION_SAMPLE_INTERVAL float (default: 0.2)
   VISION_CONFIDENCE     float (default: 0.6)
-  YOLO_MODEL_PATH       str   (default: yolov10n.pt)
+  YOLO_MODEL_PATH       str   (default: weights/best.pt)
   DRY_RUN               1     Print command, wait for [y/N] before sending (default: 1 in sitl, 0 in sandbox)
   SITL_UDP_IN           str   (default: 127.0.0.1:14550) — where we receive raw MAVLink from MAVProxy
   TELEMETRY_IN_PORT     int   (default: 9000) — UDP port for sandbox telemetry
@@ -301,7 +301,7 @@ async def run_sandbox_pipeline(args: argparse.Namespace) -> None:
     
     class_map = {cls_id: "anomaly" for cls_id in mission_profile.yolo_class_watchlist}
     watchdog = WatchdogNode(
-        model_path=os.getenv("YOLO_MODEL_PATH", "yolov10n.pt"),
+        model_path=os.getenv("YOLO_MODEL_PATH", "weights/best.pt"),
         event_queue=event_queue,
         sample_interval=float(os.getenv("VISION_SAMPLE_INTERVAL", "0.2")),
         confidence_threshold=float(os.getenv("VISION_CONFIDENCE", "0.6")),
@@ -368,7 +368,7 @@ async def run_sitl_pipeline(args: argparse.Namespace) -> None:
     show_ui = getattr(args, "show_ui", False)
     class_map = {cls_id: "anomaly" for cls_id in mission_profile.yolo_class_watchlist}
     watchdog = WatchdogNode(
-        model_path=os.getenv("YOLO_MODEL_PATH", "yolov10n.pt"),
+        model_path=os.getenv("YOLO_MODEL_PATH", "weights/best.pt"),
         event_queue=event_queue,
         sample_interval=float(os.getenv("VISION_SAMPLE_INTERVAL", "0.2")),
         confidence_threshold=float(os.getenv("VISION_CONFIDENCE", "0.6")),
@@ -458,7 +458,7 @@ async def run_free_pipeline(args: argparse.Namespace) -> None:
 
     class_map = {cls_id: "anomaly" for cls_id in mission_profile.yolo_class_watchlist}
     watchdog = WatchdogNode(
-        model_path=os.getenv("YOLO_MODEL_PATH", "yolov10n.pt"),
+        model_path=os.getenv("YOLO_MODEL_PATH", "weights/best.pt"),
         event_queue=event_queue,
         sample_interval=float(os.getenv("VISION_SAMPLE_INTERVAL", "0.2")),
         confidence_threshold=float(os.getenv("VISION_CONFIDENCE", "0.6")),

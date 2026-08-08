@@ -62,6 +62,10 @@ CLASS_NAME_TO_UNIFIED_ID = {
 ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "ZugxIA3oPeoHBSmz7dB3")
 MASTER_DIR = os.path.join(os.getcwd(), "datasets", "master_vision")
 
+# Global counters for dataset balancing
+GLOBAL_CLASS_COUNTS = {0: 0, 1: 0, 2: 0, 3: 0}
+CLASS_CAP = 18000
+
 def setup_directories():
     if os.path.exists(MASTER_DIR):
         shutil.rmtree(MASTER_DIR)
@@ -132,14 +136,36 @@ def download_and_merge_roboflow(rf, workspace_name, project_name, version_num, d
             if os.path.exists(src_lbl):
                 with open(src_lbl, "r") as f:
                     lines = f.readlines()
+                    
+                img_counts = {0: 0, 1: 0, 2: 0, 3: 0}
+                parsed_lines = []
                 for line in lines:
                     parts = line.strip().split()
                     if len(parts) >= 5:
                         old_id = int(parts[0])
                         new_id = old_to_new.get(old_id, default_unified_id)
                         if new_id is not None:
-                            valid_lines.append(f"{new_id} {' '.join(parts[1:])}\n")
-                            box_count += 1
+                            parsed_lines.append(f"{new_id} {' '.join(parts[1:])}\n")
+                            img_counts[new_id] += 1
+                            
+                # Balancing Logic
+                has_minority = img_counts[0] > 0 or img_counts[3] > 0
+                keep_image = False
+                
+                if has_minority:
+                    keep_image = True
+                else:
+                    if (img_counts[1] > 0 and GLOBAL_CLASS_COUNTS[1] < CLASS_CAP) or \
+                       (img_counts[2] > 0 and GLOBAL_CLASS_COUNTS[2] < CLASS_CAP):
+                        keep_image = True
+                
+                if keep_image:
+                    valid_lines = parsed_lines
+                    for k, v in img_counts.items():
+                        GLOBAL_CLASS_COUNTS[k] += v
+                        box_count += v
+                else:
+                    continue  # Skip image processing entirely
 
             src_img = os.path.join(img_dir, img_file)
             dst_img = os.path.join(MASTER_DIR, split, "images", f"{project_name}_{img_file}")
@@ -212,14 +238,32 @@ def pull_youtube_and_auto_annotate():
                     labels.append(f"{unified_id} {xywh[0]:.6f} {xywh[1]:.6f} {xywh[2]:.6f} {xywh[3]:.6f}")
             
             if labels:
-                img_name = f"youtube_frame_{saved_count}.jpg"
-                lbl_name = f"youtube_frame_{saved_count}.txt"
+                img_counts = {0: 0, 1: 0, 2: 0, 3: 0}
+                for lbl in labels:
+                    img_counts[int(lbl.split()[0])] += 1
+                    
+                has_minority = img_counts[0] > 0 or img_counts[3] > 0
+                keep_image = False
                 
-                cv2.imwrite(os.path.join(MASTER_DIR, "train", "images", img_name), frame)
-                with open(os.path.join(MASTER_DIR, "train", "labels", lbl_name), "w") as f:
-                    f.write("\n".join(labels))
+                if has_minority:
+                    keep_image = True
+                else:
+                    if (img_counts[1] > 0 and GLOBAL_CLASS_COUNTS[1] < CLASS_CAP) or \
+                       (img_counts[2] > 0 and GLOBAL_CLASS_COUNTS[2] < CLASS_CAP):
+                        keep_image = True
                 
-                saved_count += 1
+                if keep_image:
+                    for k, v in img_counts.items():
+                        GLOBAL_CLASS_COUNTS[k] += v
+                        
+                    img_name = f"youtube_frame_{saved_count}.jpg"
+                    lbl_name = f"youtube_frame_{saved_count}.txt"
+                    
+                    cv2.imwrite(os.path.join(MASTER_DIR, "train", "images", img_name), frame)
+                    with open(os.path.join(MASTER_DIR, "train", "labels", lbl_name), "w") as f:
+                        f.write("\n".join(labels))
+                    
+                    saved_count += 1
                 
         frame_count += 1
         

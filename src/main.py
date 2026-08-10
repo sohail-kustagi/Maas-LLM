@@ -183,7 +183,7 @@ async def process_watchdog_events(
 
             # Build analyst context and run Commander
             context = analyst.generate_event_context(event, current_snapshot, weather, feasibility, mission_profile)
-            command = await commander.generate_mavlink_command(context, current_snapshot, mission_profile)
+            command = await commander.generate_mavlink_command(context, current_snapshot, mission_profile, event.anomaly_type)
 
             if command:
                 approved = await _dry_run_gate(command, dry_run)

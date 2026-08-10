@@ -16,6 +16,8 @@ class CommanderNode:
     def __init__(self, model_repo="microsoft/Phi-3-mini-4k-instruct-gguf", model_file="Phi-3-mini-4k-instruct-q4.gguf"):
         self.model_path = os.path.join(os.getcwd(), model_file)
         self.evaluator = None
+        self.last_triggered_times = {}
+        self.cooldown_seconds = 15.0
         self.download_model(model_repo, model_file)
 
     def set_evaluator(self, evaluator):
@@ -47,8 +49,15 @@ class CommanderNode:
             urllib.request.urlretrieve(url, self.model_path, reporthook=report)
             print("\n[Commander] Download complete.")
 
-    async def generate_mavlink_command(self, context_prompt: str, telemetry=None, mission_profile: MissionProfile = None):
-        print("\n[Commander] Triggered! Generating MAVLink routing command...")
+    async def generate_mavlink_command(self, context_prompt: str, telemetry=None, mission_profile: MissionProfile = None, anomaly_type: str = "unknown"):
+        now_ts = time.time()
+        last_time = self.last_triggered_times.get(anomaly_type, -999.0)
+        if (now_ts - last_time) < self.cooldown_seconds:
+            print(f"[Commander] Cooldown active for '{anomaly_type}'. Ignoring request.")
+            return None
+        self.last_triggered_times[anomaly_type] = now_ts
+        
+        print(f"\n[Commander] Triggered! Generating MAVLink routing command for {anomaly_type}...")
         import re
         
         # Build a minimal, unambiguous system prompt

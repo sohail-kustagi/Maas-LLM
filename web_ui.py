@@ -30,18 +30,36 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
         temp_model = YOLO("weights/best.pt")
         temp_model.export(format="openvino")
         
-    print("[INFO] Initializing Video Pipeline with Intel OpenVINO on CPU")
+    print("[INFO] Initializing Video Pipeline...")
     
-    detection_model = AutoDetectionModel.from_pretrained(
-        model_type='yolov8',
-        model_path=ov_model_dir,
-        confidence_threshold=conf_threshold,
-        device='cpu'
-    )
-    
-    print("=== MODEL CLASS DICTIONARY ===")
-    print(detection_model.category_mapping)
-    print("==============================")
+    if use_sahi:
+        print("[INFO] Using SAHI with Intel OpenVINO on CPU")
+        detection_model = AutoDetectionModel.from_pretrained(
+            model_type='yolov8',
+            model_path=ov_model_dir,
+            confidence_threshold=conf_threshold,
+            device='cpu'
+        )
+        print("=== MODEL CLASS DICTIONARY ===")
+        print(detection_model.category_mapping)
+        print("==============================")
+    else:
+        print("[INFO] Bypassing SAHI, loading native YOLO on Intel Arc iGPU")
+        try:
+            import openvino.runtime as ov
+            if not hasattr(ov.Core, "_patched_for_throughput"):
+                _original_compile = ov.Core.compile_model
+                def _patched_compile(self, model, device_name=None, config=None, **kwargs):
+                    if config is None: config = {}
+                    config["PERFORMANCE_HINT"] = "THROUGHPUT"
+                    return _original_compile(self, model, device_name, config, **kwargs)
+                ov.Core.compile_model = _patched_compile
+                ov.Core._patched_for_throughput = True
+                print("[INFO] OpenVINO PERFORMANCE_HINT set to THROUGHPUT.")
+        except ImportError:
+            pass
+        
+        detection_model = YOLO(ov_model_dir, task="detect")
     
     analyst = AnalystNode()
     commander = CommanderNode()
@@ -105,13 +123,15 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
         else:
             frame_stride = 1
             if frame_count % frame_stride == 0:
-                prediction_results = get_prediction(frame, detection_model)
+                results = detection_model.predict(frame, device="GPU", conf=conf_threshold, verbose=False)
                 last_boxes = []
-                for obj in prediction_results.object_prediction_list:
-                    x1, y1, x2, y2 = map(int, [obj.bbox.minx, obj.bbox.miny, obj.bbox.maxx, obj.bbox.maxy])
-                    conf = float(obj.score.value)
-                    class_name = obj.category.name
-                    last_boxes.append((x1, y1, x2, y2, conf, class_name))
+                for r in results:
+                    for box in r.boxes:
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        conf = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        class_name = detection_model.names[cls]
+                        last_boxes.append((x1, y1, x2, y2, conf, class_name))
         
         # Draw bounding boxes (fresh or reused)
         for box in last_boxes:
@@ -179,9 +199,13 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
                     # Fire-and-forget background LLM task so video keeps playing at 30fps
                     def run_llm_task(ctx, tel, profile, a_type):
                         try:
+                            import dataclasses
+                            # Refresh timestamp to prevent validation failure after waiting in the queue
+                            tel = dataclasses.replace(tel, timestamp=time.time())
+                            
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
-                            cmd = loop.run_until_complete(commander.generate_mavlink_command(ctx, tel, profile))
+                            cmd = loop.run_until_complete(commander.generate_mavlink_command(ctx, tel, profile, a_type))
                             if cmd:
                                 last_commands[a_type] = cmd
                                 shared_logs.append(f"\n[Commander] Async Response Ready for {a_type}:\n{json.dumps(cmd, indent=2)}\n")

@@ -59,23 +59,28 @@ class CommanderNode:
         system_prompt = (
             f"{commander_persona}"
             "Output ONLY a raw JSON object with NO markdown, NO comments, NO extra text.\n"
-            "Required keys (all with double-quoted strings and float values):\n"
-            '  command: always "SET_POSITION_TARGET_LOCAL_NED"\n'
-            '  target_system: 1\n'
-            '  target_component: 1\n'
-            '  x: float (meters North, max 100)\n'
-            '  y: float (meters East, max 100)\n'
-            '  z: float (negative = up, e.g. -20.0 for 20m altitude)\n'
-            '  reasoning: short string\n'
+            "DO NOT include 'zone_assessment' or 'tactical_summary'.\n"
+            "No matter what the mission context says, the 'command' field must ALWAYS be exactly 'SET_POSITION_TARGET_LOCAL_NED'.\n"
+            "For the x, y, and z fields, you MUST output local NED offsets in meters (e.g., values between -20.0 and 20.0). DO NOT output global GPS Latitude or Longitude.\n"
+            "You MUST format your response exactly like this example:\n"
+            "{\n"
+            '  "command": "SET_POSITION_TARGET_LOCAL_NED",\n'
+            '  "reasoning": "High-confidence fire detected in sector.",\n'
+            '  "target_system": 1,\n'
+            '  "target_component": 1,\n'
+            '  "x": 15.0,\n'
+            '  "y": 10.0,\n'
+            '  "z": -20.0\n'
+            "}\n"
             "Start your response with { and end with }. No backticks. No extra lines."
         )
         
-        # Pre-seeding { forces the model to continue the JSON rather than add preamble
+        # Pre-seeding forces the model to continue the JSON rather than add preamble
         prompt = (
             f"<|system|>\n{system_prompt}<|end|>\n"
             f"<|user|>\n{context_prompt}<|end|>\n"
             f"<|assistant|>\n"
-            "{"
+            '{\n  "command": "SET_POSITION_TARGET_LOCAL_NED",'
         )
         
         loop = asyncio.get_running_loop()
@@ -83,7 +88,7 @@ class CommanderNode:
         def run_inference():
             return self.llm(
                 prompt,
-                max_tokens=200,
+                max_tokens=150,
                 stop=["<|end|>", "```", "\n\n\n"],
                 temperature=0.05,
                 echo=False,
@@ -95,7 +100,7 @@ class CommanderNode:
         
         raw = response['choices'][0]['text'].strip()
         # Re-attach the pre-seeded opening brace we used to prime the model
-        output_text = "{" + raw
+        output_text = '{\n  "command": "SET_POSITION_TARGET_LOCAL_NED",' + raw
         
         # Calculate benchmarking metrics for the hackathon
         tokens_generated = 0
@@ -157,6 +162,15 @@ class CommanderNode:
 
         try:
             command_json = json.loads(repaired)
+            
+            # Emergency fallback: Clamp coordinates if the LLM hallucinates global Lat/Lon or unsafe offsets
+            if "x" in command_json:
+                command_json["x"] = max(-99.0, min(99.0, float(command_json["x"])))
+            if "y" in command_json:
+                command_json["y"] = max(-99.0, min(99.0, float(command_json["y"])))
+            if "z" in command_json:
+                command_json["z"] = max(-49.0, min(19.0, float(command_json["z"])))
+                
             validated_command = validate_commander_output(command_json, telemetry, now=start_time)
             if self.evaluator:
                 self.evaluator.log_llm_generation(tokens_generated, elapsed_time, True)

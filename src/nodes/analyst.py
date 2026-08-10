@@ -33,18 +33,7 @@ class AnalystNode:
             "**Constraints:**\n"
             "- You must rely ONLY on the provided vision payload. Do not hallucinate objects or events that are not explicitly detected.\n"
             "- You are functioning in a high-speed pipeline. Keep your reasoning concise.\n"
-            "- **CRITICAL:** You must output ONLY valid, parsable JSON. Do not include introductory text, conversational filler, or markdown formatting (do not use ```json).\n\n"
-            "**Expected JSON Output Schema:**\n"
-            "{\n"
-            '  "frame_id": "<ID from input>",\n'
-            '  "zone_assessment": {\n'
-            '    "severity_level": "<Critical|High|Medium|Low>",\n'
-            '    "stranded_persons_detected": <true|false>,\n'
-            '    "active_rescue_in_progress": <true|false>\n'
-            '  },\n'
-            '  "tactical_summary": "<A strict 1-2 sentence description of detected objects on scene>",\n'
-            '  "commander_recommendation": "<Hold_Position|Alert_Rescue_Teams|Continue_Recon_Pattern>"\n'
-            "}"
+            "- **CRITICAL:** You must output ONLY valid, parsable JSON. Do not include introductory text, conversational filler, or markdown formatting.\n"
         )
         print("[Analyst] Initialized Lead Disaster Analyst AI with 4-class SAR schema.")
 
@@ -62,10 +51,16 @@ class AnalystNode:
         """
         print(f"[Analyst] Processing anomaly: {vision_event_type}")
         
-        alt = current_telemetry.get("alt", "Unknown")
-        lat = current_telemetry.get("lat", "Unknown")
-        lon = current_telemetry.get("lon", "Unknown")
-        heading = current_telemetry.get("heading", "Unknown")
+        if isinstance(current_telemetry, dict):
+            alt = current_telemetry.get("alt", "Unknown")
+            lat = current_telemetry.get("lat", "Unknown")
+            lon = current_telemetry.get("lon", "Unknown")
+            heading = current_telemetry.get("heading", "Unknown")
+        else:
+            alt = getattr(current_telemetry, "altitude_m", "Unknown")
+            lat = getattr(current_telemetry, "latitude", "Unknown")
+            lon = getattr(current_telemetry, "longitude", "Unknown")
+            heading = getattr(current_telemetry, "heading_deg", "Unknown")
         
         context_prompt = f"{self.system_prompt}\n\n"
         if mission_profile:
@@ -96,8 +91,8 @@ class AnalystNode:
             )
 
         context_prompt += (
-            f"\nBased strictly on the telemetry and vision detection of '{vision_event_type}', generate the structured "
-            f"intelligence brief and commander recommendation in ONLY valid JSON matching the exact schema."
+            f"\nBased strictly on the telemetry and vision detection of '{vision_event_type}', generate the MAVLink routing "
+            f"command in ONLY valid JSON."
         )
         
         return context_prompt

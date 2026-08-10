@@ -55,3 +55,5 @@ ultralytics==8.4.96
 ultralytics-thop==2.0.20
 urllib3==2.7.0
 pymavlink==2.4.49
+sahi
+openvino

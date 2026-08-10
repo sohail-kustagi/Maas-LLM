@@ -13,7 +13,8 @@ UNIFIED_CLASSES = {
     0: "infrastructure",
     1: "person",
     2: "vehicle",
-    3: "watercraft"
+    3: "watercraft",
+    4: "fire"
 }
 
 # Global class mapping from dataset label strings to our unified class IDs
@@ -63,7 +64,7 @@ ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "ZugxIA3oPeoHBSmz7dB3")
 MASTER_DIR = os.path.join(os.getcwd(), "datasets", "master_vision")
 
 # Global counters for dataset balancing
-GLOBAL_CLASS_COUNTS = {0: 0, 1: 0, 2: 0, 3: 0}
+GLOBAL_CLASS_COUNTS = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
 CLASS_CAP = 18000
 
 def setup_directories():
@@ -137,7 +138,7 @@ def download_and_merge_roboflow(rf, workspace_name, project_name, version_num, d
                 with open(src_lbl, "r") as f:
                     lines = f.readlines()
                     
-                img_counts = {0: 0, 1: 0, 2: 0, 3: 0}
+                img_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
                 parsed_lines = []
                 for line in lines:
                     parts = line.strip().split()
@@ -149,7 +150,7 @@ def download_and_merge_roboflow(rf, workspace_name, project_name, version_num, d
                             img_counts[new_id] += 1
                             
                 # Balancing Logic
-                has_minority = img_counts[0] > 0 or img_counts[3] > 0
+                has_minority = img_counts[0] > 0 or img_counts[3] > 0 or img_counts[4] > 0
                 keep_image = False
                 
                 if has_minority:
@@ -238,11 +239,11 @@ def pull_youtube_and_auto_annotate():
                     labels.append(f"{unified_id} {xywh[0]:.6f} {xywh[1]:.6f} {xywh[2]:.6f} {xywh[3]:.6f}")
             
             if labels:
-                img_counts = {0: 0, 1: 0, 2: 0, 3: 0}
+                img_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
                 for lbl in labels:
                     img_counts[int(lbl.split()[0])] += 1
                     
-                has_minority = img_counts[0] > 0 or img_counts[3] > 0
+                has_minority = img_counts[0] > 0 or img_counts[3] > 0 or img_counts[4] > 0
                 keep_image = False
                 
                 if has_minority:
@@ -305,6 +306,18 @@ if __name__ == "__main__":
         download_and_merge_roboflow(rf, workspace_name, "aerial-person-detection-hudj7", 1)
     except Exception as e:
         print(f"Warning: Failed to download aerial person detection: {e}")
+        
+    # 4. Wildfire Dataset -> Class 4 (fire)
+    try:
+        download_and_merge_roboflow(rf, workspace_name, "wildfire-j4okv-hmpty", 1, default_unified_id=4)
+    except Exception as e:
+        print(f"Warning: Failed to download wildfire: {e}")
+        
+    # 5. Fire/Flame Dataset -> Class 4 (fire)
+    try:
+        download_and_merge_roboflow(rf, workspace_name, "fire-flame-rhnvb", 1, default_unified_id=4)
+    except Exception as e:
+        print(f"Warning: Failed to download fire-flame: {e}")
         
     # Optional: Video enrichment
     pull_youtube_and_auto_annotate()

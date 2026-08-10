@@ -46,16 +46,17 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
     else:
         print("[INFO] Bypassing SAHI, loading native YOLO on Intel Arc iGPU")
         try:
-            import openvino.runtime as ov
+            import openvino as ov
             if not hasattr(ov.Core, "_patched_for_throughput"):
-                _original_compile = ov.Core.compile_model
+                ov.Core._original_compile_model = ov.Core.compile_model
                 def _patched_compile(self, model, device_name=None, config=None, **kwargs):
                     if config is None: config = {}
                     config["PERFORMANCE_HINT"] = "THROUGHPUT"
-                    return _original_compile(self, model, device_name, config, **kwargs)
+                    device_name = "GPU" # Force Intel Arc iGPU
+                    return ov.Core._original_compile_model(self, model, device_name, config, **kwargs)
                 ov.Core.compile_model = _patched_compile
                 ov.Core._patched_for_throughput = True
-                print("[INFO] OpenVINO PERFORMANCE_HINT set to THROUGHPUT.")
+                print("[INFO] OpenVINO PERFORMANCE_HINT set to THROUGHPUT and device set to GPU.")
         except ImportError:
             pass
         
@@ -74,8 +75,15 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     out_path = "output_detection.mp4"
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+    
+    import subprocess
+    ffmpeg_cmd = [
+        "ffmpeg", "-y", "-f", "rawvideo", "-vcodec", "rawvideo",
+        "-s", f"{w}x{h}", "-pix_fmt", "bgr24", "-r", str(fps),
+        "-i", "-", "-c:v", "libx264", "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p", out_path
+    ]
+    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     log_output = "Pipeline Started...\n"
     yield None, log_output
@@ -93,6 +101,7 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
     shared_logs = []
     
     pipeline_start_time = time.time()
+    gpu_failed = False
     
     while cap.isOpened():
         ret, frame = cap.read()
@@ -121,9 +130,29 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
                     class_name = obj.category.name
                     last_boxes.append((x1, y1, x2, y2, conf, class_name))
         else:
-            frame_stride = 1
+            frame_stride = 5
             if frame_count % frame_stride == 0:
-                results = detection_model.predict(frame, device="GPU", conf=conf_threshold, verbose=False)
+                try:
+                    results = detection_model.predict(frame, device="cpu", conf=conf_threshold, verbose=False)
+                except Exception as e:
+                    if not gpu_failed:
+                        gpu_failed = True
+                        msg = f"\n[WARNING] GPU offloading failed, falling back to CPU stride=5: {e}\n"
+                        shared_logs.append(msg)
+                        print(msg.strip())
+                        # Revert the OpenVINO patch to stop forcing "GPU"
+                        try:
+                            import openvino as ov
+                            if hasattr(ov.Core, "_patched_for_throughput"):
+                                ov.Core.compile_model = ov.Core._original_compile_model
+                                del ov.Core._patched_for_throughput
+                        except Exception:
+                            pass
+                        # Retry on CPU for this frame
+                        results = detection_model.predict(frame, device="cpu", conf=conf_threshold, verbose=False)
+                    else:
+                        continue # If it fails on CPU too, skip
+                
                 last_boxes = []
                 for r in results:
                     for box in r.boxes:
@@ -151,13 +180,13 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
             cv2.rectangle(annotated_frame, (x1, y_bg), (x1 + w_txt, y_bg + 20), (0, 255, 0), -1)
             cv2.putText(annotated_frame, label, (x1, y_txt), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
 
-        out.write(annotated_frame)
+        ffmpeg_proc.stdin.write(annotated_frame.tobytes())
         
         # Flush background LLM logs to the UI without blocking
         if shared_logs:
             log_output += "".join(shared_logs)
             shared_logs.clear()
-            yield out_path, log_output
+            yield gr.update(), log_output
         
         # Every 30 frames (~1 sec), trigger the LLM analyst if detections exist
         if frame_count % 30 == 0:
@@ -180,7 +209,7 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
                     last_triggered_times[anomaly_type] = current_video_timestamp
                     
                     log_output += f"\n--- Frame {frame_count} ---\n[Watchdog] Detected {anomaly_type} (conf: {best_conf:.2f})\n"
-                    yield out_path, log_output
+                    yield gr.update(), log_output
                     
                     # Mock Telemetry
                     dummy_telemetry = TelemetrySnapshot(
@@ -220,10 +249,11 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
                     cmd = last_commands.get(anomaly_type)
                     if cmd:
                         log_output += f"\n--- Frame {frame_count} ---\n[Watchdog] Cooldown Active. Reusing previous {anomaly_type} command.\n"
-                        yield out_path, log_output
+                        yield gr.update(), log_output
 
     cap.release()
-    out.release()
+    ffmpeg_proc.stdin.close()
+    ffmpeg_proc.wait()
     llm_executor.shutdown(wait=False)
     
     if shared_logs:

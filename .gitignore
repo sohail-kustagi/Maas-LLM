@@ -21,11 +21,13 @@ weights/
 # Datasets & Archives
 data/
 datasets/
-Wildfire-Smoke*/
-yolo-floods-relief*/
-Aerial-Person-Detection*/
-Houses_in_Flood*/
-SeaDrone*/
+Wildfire-*/
+Wildfire-Smoke-*/
+yolo-floods-relief-*/
+Aerial-Person-Detection-*/
+Houses_in_Flood-*/
+SeaDrone-*/
+fire-flame-*/
 master_dataset.zip
 *.zip
 *.tar.gz

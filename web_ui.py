@@ -15,7 +15,7 @@ from src.core.types import VisionEvent, TelemetrySnapshot
 from src.core.mission_profiles import PROFILES
 
 # We must run asyncio gracefully inside Gradio
-def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
+def process_video(video_path, mission_profile_name, conf_threshold, use_sahi, for_api=False):
     if not video_path:
         yield None, "Please upload a video."
         return
@@ -28,7 +28,7 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
     if not os.path.exists(ov_model_dir):
         print("[INFO] Exporting model to Intel OpenVINO format for speed...")
         temp_model = YOLO("weights/best.pt")
-        temp_model.export(format="openvino")
+        temp_model.export(format="openvino", quantize=16)
         
     print("[INFO] Initializing Video Pipeline...")
     
@@ -51,20 +51,24 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
                 ov.Core._original_compile_model = ov.Core.compile_model
                 def _patched_compile(self, model, device_name=None, config=None, **kwargs):
                     if config is None: config = {}
-                    config["PERFORMANCE_HINT"] = "THROUGHPUT"
+                    config["PERFORMANCE_HINT"] = "LATENCY"
                     device_name = "GPU" # Force Intel Arc iGPU
                     return ov.Core._original_compile_model(self, model, device_name, config, **kwargs)
                 ov.Core.compile_model = _patched_compile
                 ov.Core._patched_for_throughput = True
-                print("[INFO] OpenVINO PERFORMANCE_HINT set to THROUGHPUT and device set to GPU.")
+                print("[INFO] OpenVINO PERFORMANCE_HINT set to LATENCY and device set to GPU.")
         except ImportError:
             pass
         
         detection_model = YOLO(ov_model_dir, task="detect")
     
     analyst = AnalystNode()
-    commander = CommanderNode()
-    commander.set_evaluator(None) # Initializes the LLM engine in CommanderNode
+    if not for_api:
+        commander = CommanderNode()
+        commander.set_evaluator(None) # Initializes the LLM engine in CommanderNode
+    else:
+        commander = None
+        
     mission_profile = PROFILES.get(mission_profile_name, PROFILES["search_and_rescue"])
 
     cap = cv2.VideoCapture(video_path)
@@ -75,18 +79,14 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     out_path = "output_detection.mp4"
-    
-    import subprocess
-    ffmpeg_cmd = [
-        "ffmpeg", "-y", "-f", "rawvideo", "-vcodec", "rawvideo",
-        "-s", f"{w}x{h}", "-pix_fmt", "bgr24", "-r", str(fps),
-        "-i", "-", "-c:v", "libx264", "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p", out_path
-    ]
-    ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
 
     log_output = "Pipeline Started...\n"
-    yield None, log_output
+    structured_logs = []
+    
+    if not for_api:
+        yield None, log_output
 
     frame_count = 0
     last_boxes = []
@@ -98,6 +98,7 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
     # Async background executor for LLM to prevent video pipeline stalling
     # STRICTLY max_workers=1 to prevent Llama.cpp C-binding segfaults on concurrent calls
     llm_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    active_futures = []
     shared_logs = []
     
     pipeline_start_time = time.time()
@@ -112,6 +113,9 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
         annotated_frame = frame.copy()
         
         # Inference Branching
+        if frame_count % 30 == 0:
+            print(f"Processing frame {frame_count} / {int(cap.get(cv2.CAP_PROP_FRAME_COUNT))}...", flush=True)
+            
         if use_sahi:
             frame_stride = 10
             if frame_count % frame_stride == 0:
@@ -137,6 +141,7 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
                 except Exception as e:
                     if not gpu_failed:
                         gpu_failed = True
+                        frame_stride = 5
                         msg = f"\n[WARNING] GPU offloading failed, falling back to CPU stride=5: {e}\n"
                         shared_logs.append(msg)
                         print(msg.strip())
@@ -180,13 +185,14 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
             cv2.rectangle(annotated_frame, (x1, y_bg), (x1 + w_txt, y_bg + 20), (0, 255, 0), -1)
             cv2.putText(annotated_frame, label, (x1, y_txt), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
 
-        ffmpeg_proc.stdin.write(annotated_frame.tobytes())
+        out.write(annotated_frame)
         
         # Flush background LLM logs to the UI without blocking
         if shared_logs:
             log_output += "".join(shared_logs)
             shared_logs.clear()
-            yield gr.update(), log_output
+            if not for_api:
+                yield gr.update(), log_output
         
         # Every 30 frames (~1 sec), trigger the LLM analyst if detections exist
         if frame_count % 30 == 0:
@@ -209,7 +215,13 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
                     last_triggered_times[anomaly_type] = current_video_timestamp
                     
                     log_output += f"\n--- Frame {frame_count} ---\n[Watchdog] Detected {anomaly_type} (conf: {best_conf:.2f})\n"
-                    yield gr.update(), log_output
+                    structured_logs.append({
+                        "timestamp": time.time(),
+                        "type": "anomaly",
+                        "message": f"Detected {anomaly_type} (conf: {best_conf:.2f})"
+                    })
+                    if not for_api:
+                        yield gr.update(), log_output
                     
                     # Mock Telemetry
                     dummy_telemetry = TelemetrySnapshot(
@@ -226,35 +238,55 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
                     context = analyst.generate_context(anomaly_type, dummy_telemetry, None, None, mission_profile)
                     
                     # Fire-and-forget background LLM task so video keeps playing at 30fps
-                    def run_llm_task(ctx, tel, profile, a_type):
-                        try:
-                            import dataclasses
-                            # Refresh timestamp to prevent validation failure after waiting in the queue
-                            tel = dataclasses.replace(tel, timestamp=time.time())
-                            
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            cmd = loop.run_until_complete(commander.generate_mavlink_command(ctx, tel, profile, a_type))
-                            if cmd:
-                                last_commands[a_type] = cmd
-                                shared_logs.append(f"\n[Commander] Async Response Ready for {a_type}:\n{json.dumps(cmd, indent=2)}\n")
-                            loop.close()
-                        except Exception as e:
-                            shared_logs.append(f"\n[Commander] Async LLM Error: {e}\n")
-                            
-                    llm_executor.submit(run_llm_task, context, dummy_telemetry, mission_profile, anomaly_type)
+                    # (Skip Commander LLM in VOD mode as per user request)
+                    if not for_api:
+                        def run_llm_task(ctx, tel, profile, a_type):
+                            try:
+                                import dataclasses
+                                # Refresh timestamp to prevent validation failure after waiting in the queue
+                                tel = dataclasses.replace(tel, timestamp=time.time())
+                                
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                cmd = loop.run_until_complete(commander.generate_mavlink_command(ctx, tel, profile, a_type))
+                                if cmd:
+                                    last_commands[a_type] = cmd
+                                    shared_logs.append(f"\n[Commander] Async Response Ready for {a_type}:\n{json.dumps(cmd, indent=2)}\n")
+                                loop.close()
+                            except Exception as e:
+                                shared_logs.append(f"\n[Commander] Async LLM Error: {e}\n")
+                                
+                        future = llm_executor.submit(run_llm_task, context, dummy_telemetry, mission_profile, anomaly_type)
+                        active_futures.append(future)
                     
                 else:
                     # Within cooldown window, yield previous command without triggering LLM
                     cmd = last_commands.get(anomaly_type)
                     if cmd:
                         log_output += f"\n--- Frame {frame_count} ---\n[Watchdog] Cooldown Active. Reusing previous {anomaly_type} command.\n"
-                        yield gr.update(), log_output
+                        if not for_api:
+                            yield gr.update(), log_output
 
     cap.release()
-    ffmpeg_proc.stdin.close()
-    ffmpeg_proc.wait()
-    llm_executor.shutdown(wait=False)
+    out.release()
+    
+    log_output += "\n[System] Video processing complete. Waiting for background LLM Commander to finalize MAVLink routing...\n"
+    if not for_api:
+        yield gr.update(), log_output
+    
+    # Poll background threads so the UI receives their final logs
+    while active_futures:
+        done, not_done = concurrent.futures.wait(active_futures, timeout=0.5)
+        if shared_logs:
+            log_output += "".join(shared_logs)
+            shared_logs.clear()
+            if not for_api:
+                yield gr.update(), log_output
+        if not not_done:
+            break
+        active_futures = list(not_done)
+        
+    llm_executor.shutdown(wait=True)
     
     if shared_logs:
         log_output += "".join(shared_logs)
@@ -262,6 +294,10 @@ def process_video(video_path, mission_profile_name, conf_threshold, use_sahi):
     pipeline_elapsed_time = time.time() - pipeline_start_time
     log_output += f"\nProcessing Complete. Time elapsed: {pipeline_elapsed_time:.2f} seconds."
     
+    if for_api:
+        # Just return the tuple, no yield needed for the API
+        return out_path, structured_logs
+        
     # Return the final output video and logs
     yield out_path, log_output
 

@@ -63,7 +63,7 @@ async def analyze_video(video: UploadFile = File(...)):
         static_out_path = os.path.join("static", f"{file_id}_out.mp4")
         if os.path.exists(out_path):
             import subprocess
-            subprocess.run(["ffmpeg", "-y", "-i", out_path, "-vcodec", "libx264", static_out_path], 
+            subprocess.run(["ffmpeg", "-y", "-i", out_path, "-vcodec", "libx264", "-preset", "ultrafast", static_out_path], 
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # If ffmpeg failed or wasn't found, fallback to just moving the file

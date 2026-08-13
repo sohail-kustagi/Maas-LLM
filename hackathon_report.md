@@ -1,20 +1,18 @@
-# MAAS-LLM: Hackathon Performance Evaluation
+# MAAS-LLM: End-to-End Video Benchmark
 
 ## Test Configuration
-- **Video Source:** `tests/disaster_sample.mp4`
-- **Mission Profile:** `flood`
-- **Total Duration:** `44.36 seconds`
+- **Video:** Pella Home Fire Drone Footage (720p)
+- **Environment:** Local PC (x86 CPU Baseline)
+- **Vision Model:** YOLOv10 (PyTorch CPU)
+- **Reasoning Model:** Phi-3 4k Instruct (llama.cpp)
 
-## 👁️ Edge Vision (YOLO) Metrics
-- **Frames Processed:** 751 (16.93 FPS)
-- **Anomalies Detected:** 41
-- **Average Detection Confidence:** 69.3%
+## Stage 1: Vanilla Baseline (No LoRA)
+- **Vision Speed (YOLO):** 8.77 FPS
+- **LLM Reasoning Latency:** 26.19s per command
 
-## 🧠 LLM Commander (Phi-3) Metrics
-- **Total Commands Generated:** 1
-- **Average Latency:** 23.89s per command
-- **Inference Speed:** 4.31 Tokens/sec
-- **Valid JSON formatting rate:** 100.0%
+## Stage 2: Fine-Tuned LoRA (Disaster Analyst)
+- **Vision Speed (YOLO):** 10.33 FPS
+- **LLM Reasoning Latency:** 29.86s per command
 
 ---
 *Generated automatically by MAAS-LLM Evaluator for the Arm AI Optimization Challenge.*

@@ -26,12 +26,25 @@ class CommanderNode:
         print(f"[Commander] Loading LLM from {self.model_path}...")
         # Since this runs on an IdeaPad with 16GB RAM and Core Ultra, we will use CPU/OpenBLAS natively
         # n_ctx limits context to save RAM. n_threads automatically scales to CPU cores.
-        self.llm = Llama(
-            model_path=self.model_path,
-            n_ctx=2048,
-            n_threads=8, 
-            verbose=False
-        )
+        lora_adapter = os.path.join(os.getcwd(), "weights", "phi3-lora.gguf")
+        if os.path.exists(lora_adapter):
+            print(f"[Commander] Injecting fine-tuned LoRA adapter: {lora_adapter}")
+            self.llm = Llama(
+                model_path=self.model_path,
+                lora_path=lora_adapter,
+                n_ctx=2048,
+                n_threads=os.cpu_count(), 
+                n_threads_batch=os.cpu_count(),
+                verbose=False
+            )
+        else:
+            self.llm = Llama(
+                model_path=self.model_path,
+                n_ctx=2048,
+                n_threads=os.cpu_count(), 
+                n_threads_batch=os.cpu_count(),
+                verbose=False
+            )
         print("[Commander] LLM Loaded successfully.")
 
     def download_model(self, model_repo, model_file):
@@ -97,7 +110,7 @@ class CommanderNode:
         def run_inference():
             return self.llm(
                 prompt,
-                max_tokens=150,
+                max_tokens=300,
                 stop=["<|end|>", "```", "\n\n\n"],
                 temperature=0.05,
                 echo=False,
@@ -183,7 +196,14 @@ class CommanderNode:
             validated_command = validate_commander_output(command_json, telemetry, now=start_time)
             if self.evaluator:
                 self.evaluator.log_llm_generation(tokens_generated, elapsed_time, True)
-            return validated_command.as_dict()
+            
+            # Attach meta for frontend tracking
+            cmd_dict = validated_command.as_dict()
+            cmd_dict["_meta"] = {
+                "tokens_per_sec": round(tokens_per_sec, 2),
+                "latency_sec": round(elapsed_time, 2)
+            }
+            return cmd_dict
         except (json.JSONDecodeError, CommandValidationError) as error:
             print(f"[Commander] ERROR: Invalid command output: {error}")
             if self.evaluator:

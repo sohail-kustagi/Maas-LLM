@@ -33,7 +33,7 @@ logging.basicConfig(
 )
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-ORCHESTRATOR_URL = "http://localhost:8080"
+ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8080")
 LIVEKIT_URL      = os.getenv("LIVEKIT_URL",       "wss://maas-oa7qe4cw.livekit.cloud")
 LIVEKIT_KEY      = os.getenv("LIVEKIT_API_KEY",    "APIVKkdqFpXgYjP")
 LIVEKIT_SECRET   = os.getenv("LIVEKIT_API_SECRET", "RZarlBA7Ue9cLgZM1kHff2ge3wVZPapzJnYHzPq0RMCA")

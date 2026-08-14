@@ -17,6 +17,9 @@ htmlcov/
 *.onnx
 models/
 weights/
+llama-cpp-src/
+llama_cpp_python*/
+venv_local/
 
 # Datasets & Archives
 data/
